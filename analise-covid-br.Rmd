@@ -1,0 +1,254 @@
+---
+title: "Análise evolução COVID-19 Brasil"
+author: "Letícia Rossaneis Antunes da Silva"
+date: "29/06/2020"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Pacotes a serem usados
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(readxl)
+library(patchwork)
+```
+
+Os dados a serem usados são do dia 29/06/2020.  
+Vamos carregar os dados e exibir as primeiras linhas.
+```{r}
+#Banco de dados
+corona = read_excel("HIST_PAINEL_COVIDBR_29jun2020.xlsx", 
+                                            col_types = c("text",    # Regiao
+                                                          "text",    # Estado
+                                                          "text",    # Municipio
+                                                          "text",    # coduf
+                                                          "numeric", # codmun
+                                                          "numeric", # codRegiaoSaude
+                                                          "text",    # nomeRegiaoSaude
+                                                          "date",    # data
+                                                          "numeric", # semanaEpi
+                                                          "text",    # populacaoTCU2019
+                                                          "numeric", # casosAcumulado
+                                                          "numeric", # casosNovos
+                                                          "numeric", # obitosAcumulado
+                                                          "numeric", # obitosNovos
+                                                          "numeric", # Recuperadosnovos
+                                                          "numeric", # emAcompanhamentoNovos
+                                                          "numeric"  # FgMetro
+                                                          ))
+
+head(corona)
+```
+
+Inicialmente analisaremos a quantidade de casos e óbitos nas 100 cidades com as maiores populações do país. Para isso, iremos agrupar os dados de população de cada município e Estado e, em seguida, analisar as maiores cidades.  
+As cidades de São Paulo e Rio de Janeiro (maiores populações do país) serão excluídas dessa lista com a finalidade de melhorar a visualização dos dados pois estas apresentam população e número de casos e óbitos muito mais elevados que as outras.  
+Podemos analisar a relação entre população e casos ou óbitos. O gráfico de casos é mais linear, porém esse não é o melhor fator para determinar o comportamento do vírus, como podemos ver no gráfico de óbitos.
+```{r}
+#Separação da população total de cada município e estado para usar posteriormente
+populacao <- filter(corona, !is.na(municipio)) %>% 
+  group_by(municipio) %>% 
+  summarize(populacao = suppressWarnings(as.numeric(populacaoTCU2019[1])))
+
+#Casos e óbitos nos municípios com maiores populações
+maior_pop <- corona %>% filter(!is.na(municipio)) %>% 
+  group_by(municipio) %>% 
+  summarize(total_casos = sum(casosNovos), total_obitos = sum(obitosNovos)) %>% 
+  mutate(populacao = populacao$populacao) %>% 
+  arrange(desc(populacao)) %>%
+  #As duas cidades com maior população (São Paulo e Rio de Janeiro foram excluídas com o intuito de melorar a visualização dos dados das outras 100 cidades)
+  slice(3:102)
+
+p1 <- ggplot(maior_pop, aes(x = total_casos, y = populacao)) + 
+  geom_point(size = 2) + 
+  geom_smooth(se = FALSE, method = "loess", formula = "y ~ x", color = "#e46cf4", size = 1.5) +
+  scale_y_continuous(breaks = seq(0, 3500000, 500000), limits = c(0, 3100000)) +
+  labs(title = "Casos nas maiores cidades", x = "Casos", y = "População") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+p2 <- ggplot(maior_pop, aes(x = total_obitos, y = populacao)) +
+  geom_point(size = 2) + 
+  geom_smooth(se = FALSE, method = "loess", formula = "y ~ x", color = "#e46cf4", size = 1.5) +
+  scale_y_continuous(breaks = seq(0, 3500000, 500000), limits = c(0, 3100000)) +
+  labs(title = "Óbitos nas maiores cidades", x = "Óbitos", y = "População") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+suppressWarnings(grid.arrange(p1, p2, ncol = 2))
+```
+
+Em seguida, vamos separar os dados por regiões e observar o crescimento de casos em cada uma.
+```{r}
+regioes <- corona %>% filter(regiao != "Brasil", is.na(municipio))
+
+ggplot(regioes, aes(x = data, y = casosAcumulado)) +
+  geom_line(color = "#e46cf4", size = 1) +
+  scale_y_continuous(breaks = seq(0, 280000, 60000)) +
+  labs(title = "Casos de Covid nas regiões do Brasil", y = "Casos") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5)) +
+  facet_wrap(~ regiao)
+```
+
+É bem evidente que a região mais afetada foi o Sudeste. Veremos agora o estado com mais casos:
+```{r}
+sudeste <- corona %>% 
+  filter(regiao == "Sudeste", is.na(municipio)) %>% 
+  group_by(estado) %>% 
+  summarize(casos = sum(casosNovos)) %>% 
+  arrange(desc(casos))
+
+#Mudar nomes das colunas
+colnames(sudeste) = c("Estado", "Casos")
+
+sudeste
+```
+
+Como podemos observar, São Paulo é o estado com maior número de casos e por isso, analisaremos mais a fundo as regiões do estado.  
+Faremos um gráfico mostrando quais as 10 regiões com o maior número de casos e um com o número de óbitos. A diferença entre São Paulo e as outras é bem grande, levando em conta que São Paulo é o município com mais casos de covid do Brasil, esses dados já eram esperados.
+```{r}
+#Filtrar estado de SP mostrando casos e óbitos por regiões
+regioes_sp <- corona %>% 
+  filter(!is.na(municipio), estado == "SP") %>% 
+  group_by(nomeRegiaoSaude) %>% 
+  summarize(total_casos = sum(casosNovos), total_obitos = sum(obitosNovos))
+
+#Top 10 das regiões com mais casos
+top10_regioes_sp <- top_n(regioes_sp %>% arrange(desc(total_casos)), 10)
+
+ggplot(top10_regioes_sp, aes(x = reorder(nomeRegiaoSaude, total_casos), y = total_casos)) + 
+  geom_bar(stat = "identity", aes(fill = nomeRegiaoSaude)) +
+  geom_text(aes(label = total_casos), vjust = -0.5) +
+  scale_y_continuous(breaks = seq(0, 130000, 30000), limits = c(0, 130000)) +
+  labs(title = "Casos de Covid-19 nas regiões de São Paulo") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 25, hjust = 0.8, size = 8),
+        axis.title = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+```
+
+Ainda no estado de São Paulo, faremos uma análise da região de Sorocaba.
+```{r}
+#Região de Sorocaba
+regiao_sorocaba <- corona %>% filter(nomeRegiaoSaude == "SOROCABA") %>% 
+  group_by(municipio) %>% 
+  summarize(total_casos = sum(casosNovos), total_obitos = sum(obitosNovos))
+
+ggplot(regiao_sorocaba, aes(x = municipio, y = total_casos)) + 
+  geom_bar(stat = "identity", aes(fill = municipio)) +
+  geom_text(aes(label = total_casos), vjust = -0.5) +
+  scale_y_continuous(limits = c(0, 4350)) +
+  theme_minimal() +
+  labs(title = "Casos de Covid na região de Sorocaba") +
+  theme(axis.text.x = element_text(angle = 25, hjust = 1),
+        axis.title = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+```
+
+Vamos visualizar agora a evolução no número de casos e óbitos na cidade de Sorocaba.
+```{r}
+#Evolução de casos e óbitos em Sorocaba
+evol_sorocaba <- corona %>% 
+  select(municipio, casosAcumulado, obitosAcumulado, data) %>% 
+  filter(municipio == "Sorocaba")
+
+#DEIXAR BONITO
+casos_sor <- ggplot(evol_sorocaba, aes(x = data, y = casosAcumulado)) + 
+  geom_line(color = "#e46cf4", size = 1) +
+  labs(title = "Casos de Covid em Sorocaba", y = "Casos") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+
+obitos_sor <- ggplot(evol_sorocaba, aes(x = data, y = obitosAcumulado)) + 
+  geom_line(color = "#e46cf4", size = 1) +
+  labs(title = "Óbitos por Covid em Sorocaba", y = "Óbitos") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+
+casos_sor + obitos_sor
+```
+
+Vários fatores podem contribuir ou não para o controle do vírus. Observaremos os casos agora nas cinco cidades com os maiores IDHs do país.
+```{r}
+#Cidades com os maiores IDHs do país
+idh <- c("São Caetano do Sul", "Águas de São Pedro", "Florianópolis", "Balneário Camboriú", "Vitória")
+
+#Casos acumulados nas 5 cidades com maior IDH
+casos_idh <- corona %>% filter(municipio %in% idh) %>% 
+  group_by(municipio, data) %>% 
+  summarize(total_casos = casosAcumulado)
+
+ggplot(casos_idh, aes(x = data, y = total_casos, color = municipio)) +
+  geom_line(size = 1.2) +
+  labs(title = "Casos nas cidades de maior IHD", x = "Data", y = "Casos", color = "Município") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+E agora os óbitos:
+```{r}
+#Óbitos acumulados nas 5 cidades com maior IDH
+obitos_idh <- corona %>% filter(municipio %in% idh) %>% 
+  group_by(municipio) %>% 
+  summarize(total_obitos = sum(obitosNovos))
+
+ggplot(obitos_idh, aes(x = reorder(municipio, total_obitos), y = total_obitos)) +
+  geom_bar(stat = "identity", aes(fill = municipio)) +
+  geom_text(aes(label = total_obitos), vjust = -0.5) +
+  scale_y_continuous(breaks = seq(0, 300, 50), limits = c(0, 260)) +
+  labs(title = "Óbitos nas cidades de maior IDH", y = "Óbitos") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 10, hjust = 0.8, size = 12),
+        axis.title.x = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+```
+
+Por fim, para termos uma visão mais geral, vamos analisar os casos e óbitos por 100 mil habitantes para os 10 maiores municípios. Dessa forma, poderemos observar os dados de uma maneira diferente, que não tem interferência tão grande da população do local.
+```{r}
+#10 maiores cidades do país
+cidades <- c("São Paulo", "Rio de Janeiro", "Brasília", "Salvador", "Fortaleza", "Belo Horizonte", "Manaus", "Curitiba", "Recife", "Goiânia")
+
+#Taxa de casos e óbitos por 100mil habitantes por município
+taxa_munic <- corona %>% 
+  filter(!is.na(municipio)) %>% 
+  group_by(municipio) %>% 
+  summarize(total_casos = sum(casosNovos), total_obitos = sum(obitosNovos)) %>% 
+  mutate(populacao = populacao$populacao, taxa_casos = total_casos / populacao * 100000, taxa_obitos = total_obitos / populacao * 100000) %>%
+  filter(municipio %in% cidades)
+
+p_taxa_m <- ggplot(taxa_munic, aes(x = municipio, y = taxa_casos)) +
+  geom_bar(stat = "identity", aes(fill = municipio)) +
+  geom_text(aes(label = round(taxa_casos, 2)), vjust = -0.5, size = 3.5) +
+  scale_y_continuous(breaks = seq(0, 1800, 500), limits = c(0, 1800)) +
+  labs(title = "Casos por 100 mil habitantes", y = "Taxa") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 0.8, size = 11),
+        axis.title.x = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+p_m <- ggplot(taxa_munic, aes(x = municipio, y = total_casos)) +
+  geom_bar(stat = "identity", aes(fill = municipio)) +
+  geom_text(aes(label = total_casos), vjust = -0.5, size = 3.5) +
+  scale_y_continuous(breaks = seq(0, 160000, 40000), limits = c(0, 150000)) +
+  labs(title = "Total de casos", y = "Casos") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 0.8, size = 11),
+        axis.title.x = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+grid.arrange(p_taxa_m, p_m)
+```
